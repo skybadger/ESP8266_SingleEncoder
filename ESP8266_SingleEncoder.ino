@@ -94,7 +94,7 @@ bool encPresent = false;
 int position;
 int lastPosition;
 int ppr;                    //List ppr * number of edges = number of pulses in a rev of the encoder wheel
-int wheelDiameter;          //mm - may need to be a float. 
+float wheelDiameter;        //mm - may need to be a float. 
 int ppRollover;             //Count at which we complete a revolution of the dome.
 bool homeFlag = false;
 
@@ -204,7 +204,9 @@ void setup()
   
   //Setup webserver handler functions
   server.on("/", handleStatusGet);
+  server.on( "/restart", handlerRestart );
   server.onNotFound(handleNotFound); 
+
 
   //handler code in separate file. 
   server.on("/encoder",                  HTTP_GET, handleEncoder );
@@ -216,6 +218,7 @@ void setup()
   //server.on("/encoder/distance",         HTTP_GET, handleEncoderAsDistance );
   
   //Device setup functions
+  server.on("/setup",                  HTTP_GET, handleSetup );
   server.on("/setup/ppr",              HTTP_GET, handlePpr );
   server.on("/setup/ppr",              HTTP_PUT, handlePpr );
   server.on("/setup/wheelDiameter",    HTTP_GET, handleWheelDiameter );

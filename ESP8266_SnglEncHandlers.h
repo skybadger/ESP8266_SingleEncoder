@@ -140,14 +140,14 @@
         if ( hasArgIC( toSearchFor[0], server, false ) )
         {
           int newPos = server.arg(toSearchFor[0]).toInt();
-          if ( newPos > 0 ) 
+          if ( newPos >= 0 ) 
           {
             ppRollover = newPos;
             saveToEeprom();
           }
           else
           {
-            root["Message"]     = "Rollover value not accepted - 0 found";
+            root["Message"]     = "Rollover value not accepted < 0 found";
             returnCode = 403;
           }
         }
@@ -191,15 +191,15 @@
         String toSearchFor[] = {"wheelDiameter",};
         if ( hasArgIC( toSearchFor[0], server, false ) )
         {
-          int newSize = server.arg( toSearchFor[0] ).toInt();
-          if ( newSize > 0 ) 
+          float newSize = (float) server.arg( toSearchFor[0] ).toDouble();
+          if ( newSize > 0 && newSize < (float) __INT_MAX__ ) 
           {
             wheelDiameter = newSize;
             saveToEeprom();
           }
           else
           {
-            root["Message"]     = "Wheel diameter value not accepted - 0 found";
+            root["Message"]  = "Wheel diameter value not accepted - 0 found";
             returnCode = 403;
           }
         }
@@ -282,7 +282,6 @@
     newPosition = server.arg( argsToSearchFor[0] ).toFloat();
     if ( (newPosition >= 0 && newPosition <= 360.0F  ) ) 
     {  
-      returnCode = 403;
       enc.write( newPosition/360.0 * ppRollover );
       root["bearing"] = enc.read( )*360.0/ppRollover;
       root.printTo( errMsg );//"Invalid bearing value found"; //Should'nt happen from our own form! 
@@ -343,17 +342,26 @@
   message.concat ( "/encoder/bearing\" >Encoder as bearing (GET) </a></li>");
   message.concat( "<li><a href=\"");
   message.concat( uri );
-  message.concat ( "/encoder/ppr\" >Encoder pulses per revolution (GET|PUT ppr=value ) </a></li>");
+  message.concat ( "/setup/ppr\" >Encoder pulses per revolution (GET|PUT ppr=value ) </a></li>");
   message.concat( "<li><a href=\"");
   message.concat( uri );
-  message.concat ( "/encoder/ppRollover\" >Encoder rollover count (GET|PUT ppRollover=value ) </a></li>");
+  message.concat ( "/setup/ppRollover\" >Encoder rollover count (GET|PUT ppRollover=value ) </a></li>");
   message.concat( "<li><a href=\"");
   message.concat( uri );
-  message.concat ( "/encoder/wheelDiameter\" >Encoder tracking wheel diameter count (GET|PUT wheelDiameter=value ) </a></li>");
+  message.concat ( "/setup/wheelDiameter\" >Encoder tracking wheel diameter count (GET|PUT wheelDiameter=value ) </a></li>");
   message.concat ( "</ul></body></html>");
   server.send(404, "text/html", message);
   }
  
+  void handlerRestart( void)
+  {
+    //Trying to do a redirect to the rebooted host so we pick up from where we left off. 
+    server.sendHeader( WiFi.hostname().c_str(), String("/status"), true);
+    server.send ( 302, F("text/html"), "<!Doctype html><html>Redirecting for restart</html>");
+    DEBUGSL1("Reboot requested");
+    device.restart();
+  }
+  
   //Return sensor status
   void handleRoot()
   {

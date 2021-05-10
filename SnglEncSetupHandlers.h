@@ -75,7 +75,7 @@ void handleEncoderSetupPut( void )
   String errMsg;
   int newPosition = 0;
   int newResolution;
-  int newDiameter;
+  float newDiameter;
   int newRollover;
  
   debugURI( errMsg );
@@ -119,11 +119,11 @@ void handleEncoderSetupPut( void )
       form = setupFormBuilder( form, errMsg );
       server.send( returnCode, "text/html", form ); 
   } 
-  newDiameter = server.arg(argsToSearchFor[3]).toInt();
-  if( !( newDiameter > 0 && newDiameter <= __INT_MAX__ ) )
+  newDiameter = (float) server.arg(argsToSearchFor[3]).toDouble();
+  if( !( newDiameter > 0.0 && newDiameter <= (float)__INT_MAX__ ) )
   {
       returnCode = 403;
-      errMsg = "Wheel dimater out of range 0< wheel diameter < __INT_MAX__"; 
+      errMsg = "Wheel diameter out of range; 0.0F < wheel diameter < __INT_MAX__"; 
       form = setupFormBuilder( form, errMsg );
       server.send( returnCode, "text/html", form ); 
   }
