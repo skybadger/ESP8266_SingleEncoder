@@ -91,7 +91,7 @@ void handleEncoderSetupPut( void )
       returnCode = 403;
       errMsg = "Not all args found"; //Should'nt happen from our own form! 
       form = setupFormBuilder( form, errMsg );
-      server.send( returnCode, "text/html", form ); 
+      server.send( returnCode, F("text/html"), form ); 
     }
   }
   
@@ -101,7 +101,7 @@ void handleEncoderSetupPut( void )
       returnCode = 403;
       errMsg = "Not all args found"; //Should'nt happen from our own form! 
       form = setupFormBuilder( form, errMsg );
-      server.send( returnCode, "text/html", form ); 
+      server.send( returnCode, F("text/html"), form ); 
   }
   newResolution = server.arg(argsToSearchFor[1]).toInt();
   if( !( newResolution > 0 && newResolution <= __INT_MAX__ ) )
@@ -109,7 +109,7 @@ void handleEncoderSetupPut( void )
       returnCode = 403;
       errMsg = "Resolution out of range "; 
       form = setupFormBuilder( form, errMsg );
-      server.send( returnCode, "text/html", form ); 
+      server.send( returnCode, F("text/html"), form ); 
   }
   newRollover = server.arg(argsToSearchFor[2]).toInt();
   if( !( newRollover > 0 && newRollover <= __INT_MAX__ ) && newRollover >= ppr )
@@ -117,7 +117,7 @@ void handleEncoderSetupPut( void )
       returnCode = 403;
       errMsg = "Rollover out of range , 0< rollover <= ppr <= __INT_MAX__"; 
       form = setupFormBuilder( form, errMsg );
-      server.send( returnCode, "text/html", form ); 
+      server.send( returnCode, F("text/html"), form ); 
   } 
   newDiameter = (float) server.arg(argsToSearchFor[3]).toDouble();
   if( !( newDiameter > 0.0 && newDiameter <= (float)__INT_MAX__ ) )
@@ -125,7 +125,7 @@ void handleEncoderSetupPut( void )
       returnCode = 403;
       errMsg = "Wheel diameter out of range; 0.0F < wheel diameter < __INT_MAX__"; 
       form = setupFormBuilder( form, errMsg );
-      server.send( returnCode, "text/html", form ); 
+      server.send( returnCode, F("text/html"), form ); 
   }
 
   //Update from valid values
@@ -140,9 +140,9 @@ void handleEncoderSetupPut( void )
   returnCode = 200;
   errMsg = ""; 
   form = setupFormBuilder( form, errMsg );
-  server.send( returnCode, "text/html", form ); 
+  server.send( returnCode, F("text/html"), form ); 
  
-  DEBUGSL1( "Exiting handleSetupPositionPut" );
+  DEBUGSL1( F("Exiting handleSetupPositionPut") );
 }
 
 /*

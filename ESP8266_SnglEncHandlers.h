@@ -140,7 +140,7 @@
         if ( hasArgIC( toSearchFor[0], server, false ) )
         {
           int newPos = server.arg(toSearchFor[0]).toInt();
-          if ( newPos >= 0 ) 
+          if ( newPos >= 0 && newPos < __INT_MAX__ ) 
           {
             ppRollover = newPos;
             saveToEeprom();
@@ -282,7 +282,7 @@
     newPosition = server.arg( argsToSearchFor[0] ).toFloat();
     if ( (newPosition >= 0 && newPosition <= 360.0F  ) ) 
     {  
-      enc.write( newPosition/360.0 * ppRollover );
+      enc.write( newPosition/360.0F * ppRollover );
       root["bearing"] = enc.read( )*360.0/ppRollover;
       root.printTo( errMsg );//"Invalid bearing value found"; //Should'nt happen from our own form! 
       returnCode = 200;

@@ -9,6 +9,7 @@
  One of the things I want is to use the encoder as a compass replacement - the encoder is driven by a larger circle so the rollover and wheel dimater are important. 
  
 To do:
+Add an interrupt to the home pin on GPIO3 to detect one rev complete if the encoder supports it
 
 Done: 
 OTA update
@@ -16,17 +17,23 @@ EEPRom support
 Status settings
 REST API
 Tested electronics output using 12v VSS and p-channel mosfet attached to pin 3 to control encoder power-up sequence. 
+Updated the variables handlers to actually work
+: Need to add 800 to the default rotation count  - represents the size of my dome. So the wheel size is slightly less than 62mm at 61.3mm
+Add position publishing function to record latest position to MQTT - aim is to read back on next startup using retained messages. 
+PublishFunction not yet called. 
+Added lastwill message - needs modifying to use hostname as a variable. 
 
  Layout:
  GPIO 4,2 to SDA
  GPIO 5,0 to SCL 
  All 3.3v logic. 
  
+ NOTE THAT IF YOU USE INTERRUPTS MAKE SURE THE ENCODER SOURCE CODE IS UPDATED AND WATCH FOR LIBRARY UPDATES OVERWRITING,
+ THE SYMPTOM IS INSTANT REBOOT AFTER START WITHOUT WATCHDOG TIMEOUT. 
  */
 //Specify which pins - device dependent
 //#define _ESP8266_12
 #define _ESP8266_01
-#define DEBUG
 
 //Comment if you want interrupts and you have added the 'ICACHE_RAM_ATTR' to the 
 //ISR handler functions in the encoder interrupts.h file. 
@@ -39,7 +46,6 @@ Tested electronics output using 12v VSS and p-channel mosfet attached to pin 3 t
 #include <Wire.h> //needed for common_funcs
 #include <PubSubClient.h> //https://pubsubclient.knolleary.net/api.html
 #include <EEPROM.h>
-#include <Time.h>         //Look at https://github.com/PaulStoffregen/Time for a more useful internal timebase library
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoJson.h>  //https://arduinojson.org/v5/api/
@@ -51,6 +57,7 @@ Tested electronics output using 12v VSS and p-channel mosfet attached to pin 3 t
 #include <time.h>
 #include <sys/time.h>
 #include <coredecls.h>
+
 #define TZ              0       // (utc+) TZ in hours
 #define DST_MN          60      // use 60mn for summer time in some countries
 #define TZ_MN           ((TZ)*60)
@@ -58,7 +65,7 @@ Tested electronics output using 12v VSS and p-channel mosfet attached to pin 3 t
 #define DST_SEC         ((DST_MN)*60)
 time_t now; //use as 'gmtime(&now);'
 
-const int MAX_NAME_LENGTH = 25;
+const int MAX_NAME_LENGTH = 40;
 
 #include "SkybadgerStrings.h"
 char* defaultHostname        = "espENC01";
@@ -81,13 +88,12 @@ ETSTimer timer, timeoutTimer;
 volatile bool newDataFlag = false;
 volatile bool timeoutFlag = false;
 
-//Todo Add an interrupt to the home pin on GPIO3 to detect one rev complete if the encoder supports it
-
 //Function definitions
 void onTimer(void);
 String& getTimeAsString(String& );
-uint32_t inline ICACHE_RAM_ATTR myGetCycleCount(); //Processor instruction counter - very high res timing 
 void callback(char* topic, byte* payload, unsigned int length) ; //MQTT callback handler
+void setup_wifi(void );
+void publishPosition( void );
 
 //Encoder setup 
 bool encPresent = false;
@@ -116,37 +122,6 @@ Encoder enc( 5, 6); //Connect to D1 and D2 respectively on the silkscreen
 #include "SnglEncSetupHandlers.h"
 
 //#include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
-void setup_wifi()
-{
-  DEBUGSL1("Starting WiFi..");
-  int zz=0;
-
-  WiFi.mode(WIFI_STA);
-  WiFi.hostname( myHostname );  
-  WiFi.begin( ssid2, password2 );
-
-  while (WiFi.status() != WL_CONNECTED) 
-  {
-    delay(500);
-      Serial.print(".");
-    zz++;
-    if ( zz >200 )
-      device.restart();
-  }
-  Serial.println("WiFi connected");
-  Serial.printf("SSID: %s, Signal strength %i dBm \n\r", WiFi.SSID().c_str(), WiFi.RSSI() );  
-  Serial.printf("Hostname: %s\n\r",      WiFi.hostname().c_str() );
-  Serial.printf("IP address: %s\n\r",    WiFi.localIP().toString().c_str() );
-  Serial.printf("DNS address 0: %s\n\r", WiFi.dnsIP(0).toString().c_str() );
-  Serial.printf("DNS address 1: %s\n\r", WiFi.dnsIP(1).toString().c_str() );
-
-  //Setup sleep parameters
-  //wifi_set_sleep_type(LIGHT_SLEEP_T);
-  wifi_set_sleep_type(NONE_SLEEP_T);
-  
-  Serial.print("WiFi complete..");
-  delay(5000);
-}
 
 void setup()
 {
@@ -190,8 +165,11 @@ void setup()
     
   //Open a connection to MQTT
   client.setServer( mqtt_server, 1883 );
-  client.connect( thisID, pubsubUserID, pubsubUserPwd ); 
-
+  String lastWillTopic = String( outHealthTopic );
+  lastWillTopic.concat( myHostname );
+  //want to connect to a 'dirty' session not a clean one, that way we receive any outstanding messages waiting
+  client.connect( thisID, pubsubUserID, pubsubUserPwd, lastWillTopic.c_str(), 1, true, "Offline", false ); 
+  
   //Create a timer-based callback that causes this device to read the local i2C bus devices for data to publish.
   client.setCallback( callback );
   client.subscribe( inTopic, 1 );
@@ -204,9 +182,9 @@ void setup()
   
   //Setup webserver handler functions
   server.on("/", handleStatusGet);
+  server.on("/status", handleStatusGet);
   server.on( "/restart", handlerRestart );
   server.onNotFound(handleNotFound); 
-
 
   //handler code in separate file. 
   server.on("/encoder",                  HTTP_GET, handleEncoder );
@@ -262,16 +240,9 @@ void loop()
   String timestamp;
   String output;
   float bearing = 0.0F;
-  int mqttState = 0;
   
-  DynamicJsonBuffer jsonBuffer(256);
-  JsonObject& root = jsonBuffer.createObject();
-
   if( newDataFlag == true ) //every second
   {
-    root["time"] = getTimeAsString( timestamp );
-    //Serial.println( getTimeAsString( timestamp ) );
-
     position = enc.read();
     if ( position != lastPosition )
     {
@@ -295,20 +266,21 @@ void loop()
 
   if ( client.connected() )
   {
+    //Service MQTT keep-alives
+    client.loop();
     if (callbackFlag ) 
     {
       //publish results
       publishHealth();
+      publishEncoder();
       callbackFlag = false;
     }
-    //Service MQTT keep-alives
-    client.loop();
   }
   else
   {
     //reconnect();
     reconnectNB();
-    client.subscribe(inTopic);
+    client.subscribe( inTopic, 1 );
   }
   
   //Handle web requests
@@ -327,6 +299,44 @@ void loop()
   callbackFlag = true;  
  }
 
+/*
+void publishPosition( void )
+ {
+  String outTopic;
+  String output;
+  String timestamp;
+  bool pubState = false;
+  
+  getTimeAsString2( timestamp );
+
+  //publish to our device topic(s)
+  DynamicJsonBuffer jsonBuffer(256);
+  JsonObject& root = jsonBuffer.createObject();
+  
+  DEBUGSL1( "Publish Position entered");
+
+  root["sensor"] = "encoder";
+  root["time"] = timestamp;
+  root["value"] = position;
+  root["hostname"] = myHostname;
+
+  outTopic = String(outFnTopic);
+  outTopic.concat("position/");
+  outTopic.concat(myHostname);
+
+  root.printTo( output );
+  pubState = client.publish( outTopic.c_str(), output.c_str(), true );
+
+  if( !pubState )
+    Serial.println( "Failed to publish position sensor measurement");    
+  else
+  {    
+    Serial.println( "Published position sensor measurement ");
+    Serial.printf( "Topic %s published with value %s \n", outTopic.c_str(), output.c_str() );
+  }
+}
+*/
+
 void publishHealth(void)
 {
   String outTopic;
@@ -340,11 +350,12 @@ void publishHealth(void)
   //publish to our device topic(s)
   DynamicJsonBuffer jsonBuffer(300);
   JsonObject& root = jsonBuffer.createObject();
+  
   root["time"] = timestamp;
   root["hostname"] = myHostname;
   root["message"] = "Listening";
   root.printTo( output );
-  outTopic = outHealthTopic;
+  outTopic = String( outHealthTopic );
   outTopic.concat( myHostname );  
   
   if ( client.publish( outTopic.c_str(), output.c_str(), true ) )
@@ -354,36 +365,29 @@ void publishHealth(void)
   return;
 }
 
-/*
- * Had to do a lot of work to get this to work 
- * Mostly around - 
- * length of output buffer
- * reset of output buffer between writing json strings otherwise it concatenates. 
- * Writing to serial output was essential.
- */
- void publishStuff( void )
+ void publishEncoder( void )
  {
   String outTopic;
   String output;
   String timestamp;
   
-  //checkTime();
-  getTimeAsString( timestamp );
-  
   if (encPresent) 
   {
     //publish to our device topic(s)
+    
+    //checkTime();
+    getTimeAsString2( timestamp );
     DynamicJsonBuffer jsonBuffer(300);
     JsonObject& root = jsonBuffer.createObject();
 
     output="";//reset
-    root["sensor"]     = "Encoder";
+    root["sensor"]     = "encoder";
     root["time"]       = timestamp;
     root["hostname"]   = myHostname;
     root["Position"]   = position;
-    root["Bearing"]   = (position/ppRollover) * 360.0F;
+    root["Bearing"]    = (position/ppRollover) * 360.0F;
 
-    outTopic = outSenseTopic;
+    outTopic = String(outSenseTopic);
     outTopic.concat("Encoder/");
     outTopic.concat(myHostname);
 
@@ -393,11 +397,38 @@ void publishHealth(void)
     else    
       Serial.printf( "Failed to publish Encoder position sensor measurement %s to %s\n",  output.c_str(), outTopic.c_str() );
   }
+ return;
 }
 
-uint32_t inline ICACHE_RAM_ATTR myGetCycleCount()
+void setup_wifi()
 {
-    uint32_t ccount;
-    __asm__ __volatile__("esync; rsr %0,ccount":"=a" (ccount));
-    return ccount;
+  DEBUGSL1("Starting WiFi..");
+  int zz=0;
+
+  WiFi.mode(WIFI_STA);
+  WiFi.hostname( myHostname );  
+  //WiFi.begin( ssid1, password1 );
+  WiFi.begin( ssid2, password2 );
+
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+    delay(500);
+      Serial.print(".");
+    zz++;
+    if ( zz >200 )
+      device.restart();
+  }
+  Serial.println("WiFi connected");
+  Serial.printf("SSID: %s, Signal strength %i dBm \n\r", WiFi.SSID().c_str(), WiFi.RSSI() );  
+  Serial.printf("Hostname: %s\n\r",      WiFi.hostname().c_str() );
+  Serial.printf("IP address: %s\n\r",    WiFi.localIP().toString().c_str() );
+  Serial.printf("DNS address 0: %s\n\r", WiFi.dnsIP(0).toString().c_str() );
+  Serial.printf("DNS address 1: %s\n\r", WiFi.dnsIP(1).toString().c_str() );
+
+  //Setup sleep parameters
+  //wifi_set_sleep_type(LIGHT_SLEEP_T);
+  wifi_set_sleep_type(NONE_SLEEP_T);
+  
+  Serial.print("WiFi complete..");
+  delay(5000);
 }
